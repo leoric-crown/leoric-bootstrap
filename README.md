@@ -13,8 +13,11 @@ This script automates:
 
 ## ⚡ Usage
 
-Run this on a freshly installed Ubuntu/Fedora system:
+Run this on a freshly installed Arch (Omarchy), Fedora, or Ubuntu/WSL system:
 
 ```bash
-wget -qO- "https://raw.githubusercontent.com/leoric-crown/ansible-bootstrap/main/bootstrap.bash?nocache=$(date +%s)" | bash
+curl -fsSL "https://raw.githubusercontent.com/leoric-crown/ansible-bootstrap/main/bootstrap.bash?nocache=$(date +%s)" \
+  | bash 2>&1 | tee /tmp/bootstrap.log
 ```
+
+`curl` is preferred because Arch base doesn't ship `wget`. The `tee` keeps a local log at `/tmp/bootstrap.log` for forensics — handy if anything in the pipeline fails partway.

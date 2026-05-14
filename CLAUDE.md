@@ -5,8 +5,11 @@
 Curl-pipe entry point for fresh-machine bootstrap:
 
 ```bash
-wget -qO- "https://raw.githubusercontent.com/leoric-crown/ansible-bootstrap/main/bootstrap.bash?nocache=$(date +%s)" | bash
+curl -fsSL "https://raw.githubusercontent.com/leoric-crown/ansible-bootstrap/main/bootstrap.bash?nocache=$(date +%s)" \
+  | bash 2>&1 | tee /tmp/bootstrap.log
 ```
+
+(`curl` over `wget` — Arch base ships curl, not wget. The `tee` keeps a forensics log.)
 
 This repo is **being slimmed**, not sunset. The crown-jewel SSH/gh auth dance stays; ansible invocation is being removed in favor of `chezmoi apply` running `run_onchange_*.sh.tmpl` scripts directly.
 
