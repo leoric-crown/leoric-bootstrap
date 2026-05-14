@@ -315,6 +315,19 @@ if ! chezmoi apply; then
   fi
 fi
 
+# Helper menu is Linux/LAN-specific (add-pi-keys, systemd .mount Samba,
+# BitLocker via cryptsetup). Skip entirely on macOS.
+if [[ "$OS_TYPE" == "Darwin" ]]; then
+  echo "[+] macOS — skipping Linux/LAN helper menu (Pi keys, Samba mount, BitLocker)."
+  echo "    SMB on macOS: Finder → Cmd+K → smb://<host>/<share>"
+  echo
+  echo "✓ Done! To apply your new login shell, log out and back in (or reboot)."
+  echo
+  echo "Enjoy your new workstation!"
+  echo
+  exit 0
+fi
+
 # Helper scripts.
 # Dropped from this menu (2026-05-13):
 #   - add-gh-ssh-keys.bash → bootstrap.bash now uploads the personal SSH key
