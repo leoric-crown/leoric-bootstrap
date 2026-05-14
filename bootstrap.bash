@@ -301,14 +301,20 @@ else
 fi
 
 if command -v claude &>/dev/null; then
-  # `claude login` is idempotent: returns quickly if already authed,
-  # otherwise prompts the device-code flow (works because download-then-exec
-  # means stdin is the TTY, not a curl pipe).
-  echo "[+] Ensuring Claude is authenticated..."
-  claude login || echo "⚠️  claude login returned non-zero; rerun 'claude login' manually."
+  echo "[✓] Claude Code at $(command -v claude)"
+  # Authentication note: `claude login` is a status-probe CLI subcommand
+  # (returns non-zero when not authed and prints "Please run /login").
+  # Actual auth happens inside the REPL via the `/login` slash command —
+  # there's no programmatic auth, so we don't try here. The chezmoi
+  # run_onchange_install-claude-plugins.sh.tmpl exits 1 on unauth'd
+  # marketplace list, so subsequent `chezmoi apply` runs auto-retry once
+  # the user completes /login.
+  echo "    To authenticate after bootstrap: open a fresh terminal, run 'claude',"
+  echo "    type '/login', complete the browser flow. Then: chezmoi apply"
 else
   echo "⚠️  Claude not on PATH after install attempt — plugin replay will be skipped."
-  echo "    After bootstrap, open a fresh terminal and run:  claude login && chezmoi apply"
+  echo "    After bootstrap: install Claude manually (https://claude.ai/install.sh),"
+  echo "    fresh terminal → 'claude' → '/login', then chezmoi apply."
 fi
 
 echo "[+] Initializing chezmoi..."
@@ -369,29 +375,25 @@ BITLOCKER_SCRIPT="$SCRIPTSDIR/linux/bitlocker/bitlocker-setup.bash"
 
 echo "[+] Running optional helper scripts..."
 
-# Build helper lookup
-declare -A HELPERS=(
-  ["Add SSH keys to Pis"]="$PI_KEYS_SCRIPT"
-  ["Mount Samba share"]="$MNT_SHARED_SCRIPT"
-  ["Set up BitLocker mounts"]="$BITLOCKER_SCRIPT"
-)
-# ["Set up br0 bridge interface"]="$BRIDGE_SCRIPT" # TODO
-
-
-# Declare the order we want. Pi-keys helper is cross-platform (just
-# ssh-copy-id). Samba mount uses systemd .mount units, BitLocker uses
-# cryptsetup — both Linux-only, so we omit them from the menu on macOS
-# (SMB on Mac: Finder → Cmd+K → smb://<host>/<share>).
-ORDER=("Add SSH keys to Pis")
+# Parallel arrays — avoids `declare -A name=(["key with spaces"]=val)` which
+# trips bash's set -u in some versions (arithmetic eval on the key names the
+# inner words as variables; reproduced as "Pis: unbound variable" on macOS
+# bash 4). Pi-keys helper is cross-platform (ssh-copy-id); Samba mount +
+# BitLocker are Linux-only (systemd .mount / cryptsetup), so we omit them
+# on macOS — SMB on Mac: Finder → Cmd+K → smb://<host>/<share>.
+helper_names=("Add SSH keys to Pis")
+helper_paths=("$PI_KEYS_SCRIPT")
 if [[ "$OS_TYPE" != "Darwin" ]]; then
-  ORDER+=("Mount Samba share" "Set up BitLocker mounts")
+  helper_names+=("Mount Samba share" "Set up BitLocker mounts")
+  helper_paths+=("$MNT_SHARED_SCRIPT" "$BITLOCKER_SCRIPT")
 fi
-# "Set up br0 bridge interface" # TODO
+# To add another helper: append to both arrays in parallel.
+# "Set up br0 bridge interface" / "$BRIDGE_SCRIPT" # TODO
 
 
-# Iterate in that exact order
-for desc in "${ORDER[@]}"; do
-  path="${HELPERS[$desc]}"
+for i in "${!helper_names[@]}"; do
+  desc="${helper_names[$i]}"
+  path="${helper_paths[$i]}"
   if [ -f "$path" ]; then
     if prompt_yes_no "Do you want to ${desc}?"; then
       echo "[+] ${desc}..."
