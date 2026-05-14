@@ -333,19 +333,23 @@ echo "[+] Running chezmoi config..."
 # the chezmoi-managed ~/.gitconfig becomes the authoritative URL-rewrite source.
 git config --global --unset url."git@github.com:".insteadOf
 
-# If chezmoi apply fails (e.g. a run_onchange_ script bailed because sudo
+# Use `chezmoi update` (pull + apply) so re-runs of bootstrap pick up upstream
+# chezmoi commits — this is what makes the full bootstrap one-liner idempotent
+# end-to-end. On first run, the pull is a no-op (source was just cloned).
+#
+# If chezmoi update fails (e.g. a run_onchange_ script bailed because sudo
 # wasn't cached), don't crash bootstrap.bash — try once with refreshed sudo,
 # then surface the failure cleanly.
-if ! chezmoi apply; then
+if ! chezmoi update; then
   echo
   echo "⚠️  chezmoi apply returned non-zero. Most common cause: a run_onchange_"
   echo "    script needed sudo and the cached credentials expired."
   echo "[+] Refreshing sudo and retrying once..."
-  if sudo -v && chezmoi apply; then
-    echo "✓ chezmoi apply succeeded on retry."
+  if sudo -v && chezmoi update; then
+    echo "✓ chezmoi update succeeded on retry."
   else
-    echo "✗ chezmoi apply still failing — inspect output above. You can rerun"
-    echo "  manually any time with: sudo -v && chezmoi apply"
+    echo "✗ chezmoi update still failing — inspect output above. You can rerun"
+    echo "  manually any time with: sudo -v && chezmoi update"
     echo "  Bootstrap will continue to the helper menu so you can still use"
     echo "  the partially-provisioned system."
   fi
