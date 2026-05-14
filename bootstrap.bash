@@ -235,18 +235,10 @@ else
   chezmoi init "$DOTFILESREPO"
 fi
 
-# Scripts repo
-echo "[+] Cloning leoric-scripts repo (branch: $SCRIPTBRANCH)…"
-if [ ! -d "$SCRIPTSDIR/.git" ]; then
-  git clone --depth 1 --branch "$SCRIPTBRANCH" \
-    "$SCRIPTSREPO" "$SCRIPTSDIR"
-else
-  echo "[✓] $SCRIPTSDIR already exists, skipping clone."
-fi
-
-if [ -d "$SCRIPTSDIR/.git" ]; then
-  sync_repo "$SCRIPTSREPO" "$SCRIPTSDIR" "$SCRIPTBRANCH"
-fi
+# Scripts repo — sync_repo handles both clone-if-missing and fetch+reset
+# if already present, so existing checkouts always end at origin/$SCRIPTBRANCH.
+echo "[+] Syncing leoric-scripts repo (branch: $SCRIPTBRANCH)…"
+sync_repo "$SCRIPTSREPO" "$SCRIPTSDIR" "$SCRIPTBRANCH"
 
 # Apply chezmoi config
 echo "[+] Running chezmoi config..."
@@ -272,11 +264,15 @@ if ! chezmoi apply; then
   fi
 fi
 
-# Helper scripts
-GH_KEYS_SCRIPT="$SCRIPTSDIR/ssh/add-gh-ssh-keys.bash"
+# Helper scripts.
+# Dropped from this menu (2026-05-13):
+#   - add-gh-ssh-keys.bash → bootstrap.bash now uploads the personal SSH key
+#     inline; the helper was designed for a dual-account flow (personal +
+#     EPAM `id_rleon1_*`) that we purged earlier.
+#   - sync-pihole-hosts.bash → manual /etc/hosts sync from pihole, not
+#     bootstrap-critical. Still runnable on-demand from ~/scripts/linux/.
 PI_KEYS_SCRIPT="$SCRIPTSDIR/ssh/add-pi-ssh-keys.bash"
-PIHOLE_SCRIPT="$SCRIPTSDIR/linux/sync-pihole-hosts.bash"
-MNT_SHARED_SCRIPT="$SCRIPTSDIR/linux/fedora/mnt_shared.bash"
+MNT_SHARED_SCRIPT="$SCRIPTSDIR/linux/mnt_shared.bash"
 BITLOCKER_SCRIPT="$SCRIPTSDIR/linux/bitlocker/bitlocker-setup.bash"
 # BRIDGE_SCRIPT="$SCRIPTSDIR/linux/fedora/br0.bash" # TODO
 
@@ -284,9 +280,7 @@ echo "[+] Running optional helper scripts..."
 
 # Build helper lookup
 declare -A HELPERS=(
-  ["Add SSH keys to GitHub"]="$GH_KEYS_SCRIPT"
   ["Add SSH keys to Pis"]="$PI_KEYS_SCRIPT"
-  ["Sync PiHole hosts"]="$PIHOLE_SCRIPT"
   ["Mount Samba share"]="$MNT_SHARED_SCRIPT"
   ["Set up BitLocker mounts"]="$BITLOCKER_SCRIPT"
 )
@@ -295,9 +289,7 @@ declare -A HELPERS=(
 
 # Declare the order we want
 ORDER=(
-  "Add SSH keys to GitHub"
   "Add SSH keys to Pis"
-  "Sync PiHole hosts"
   "Mount Samba share"
   "Set up BitLocker mounts"
 )
