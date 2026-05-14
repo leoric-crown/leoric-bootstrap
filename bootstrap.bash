@@ -253,7 +253,24 @@ echo "[+] Running chezmoi config..."
 # Revert the in-bootstrap insteadOf rewrite (set during the SSH/gh dance) so
 # the chezmoi-managed ~/.gitconfig becomes the authoritative URL-rewrite source.
 git config --global --unset url."git@github.com:".insteadOf
-chezmoi apply
+
+# If chezmoi apply fails (e.g. a run_onchange_ script bailed because sudo
+# wasn't cached), don't crash bootstrap.bash — try once with refreshed sudo,
+# then surface the failure cleanly.
+if ! chezmoi apply; then
+  echo
+  echo "⚠️  chezmoi apply returned non-zero. Most common cause: a run_onchange_"
+  echo "    script needed sudo and the cached credentials expired."
+  echo "[+] Refreshing sudo and retrying once..."
+  if sudo -v && chezmoi apply; then
+    echo "✓ chezmoi apply succeeded on retry."
+  else
+    echo "✗ chezmoi apply still failing — inspect output above. You can rerun"
+    echo "  manually any time with: sudo -v && chezmoi apply"
+    echo "  Bootstrap will continue to the helper menu so you can still use"
+    echo "  the partially-provisioned system."
+  fi
+fi
 
 # Helper scripts
 GH_KEYS_SCRIPT="$SCRIPTSDIR/ssh/add-gh-ssh-keys.bash"
