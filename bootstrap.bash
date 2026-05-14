@@ -19,6 +19,11 @@ SCRIPTSDIR="$HOME/scripts"
 
 SSH_KEY_PATH="$HOME/.ssh/id_leoric_ed25519_github"
 SSH_PUB_PATH="${SSH_KEY_PATH}.pub"
+# Canonical personal key for general SSH (pi/ws/vm/etc). chezmoi-managed
+# ssh_config references it for ssh_hosts entries. Separate from the
+# github-specific key above so IdentitiesOnly remains clean per-host.
+PERSONAL_KEY_PATH="$HOME/.ssh/id_ed25519"
+PERSONAL_PUB_PATH="${PERSONAL_KEY_PATH}.pub"
 
 DOTFILESREPO="git@github.com:leoric-crown/dotfiles.git"
 SCRIPTSREPO="git@github.com:leoric-crown/leoric-scripts.git"
@@ -147,12 +152,22 @@ curl -fsLS get.chezmoi.io | sh
 
 echo "[+] Setting up SSH key for GitHub..."
 
-# Generate the SSH key if it doesn't exist
+# Generate the GitHub-specific SSH key if it doesn't exist
 if [ ! -f "$SSH_KEY_PATH" ]; then
   echo "[+] Generating new SSH key at $SSH_KEY_PATH..."
   ssh-keygen -t ed25519 -C "leoric@$(hostname)" -f "$SSH_KEY_PATH" -N ""
 else
   echo "[✓] SSH key already exists at $SSH_KEY_PATH"
+fi
+
+# Generate the canonical personal SSH key (idempotent; only if missing).
+# Used by chezmoi-managed ssh_config for pi/ws/vm/etc. ssh-copy-id helpers
+# downstream assume this exists.
+if [ ! -f "$PERSONAL_KEY_PATH" ]; then
+  echo "[+] Generating personal SSH key at $PERSONAL_KEY_PATH..."
+  ssh-keygen -t ed25519 -C "leoric@$(hostname)" -f "$PERSONAL_KEY_PATH" -N ""
+else
+  echo "[✓] Personal SSH key already exists at $PERSONAL_KEY_PATH"
 fi
 
 # Add to ssh-agent
@@ -161,12 +176,18 @@ if [[ -z "${SSH_AUTH_SOCK:-}" || ! -S "$SSH_AUTH_SOCK" ]]; then
   eval "$(ssh-agent -s)" >/dev/null
 fi
 
-# Add the key if not already loaded
+# Add both keys if not already loaded
 if ! ssh-add -l 2>/dev/null | grep -q "$SSH_KEY_PATH"; then
   echo "[+] Adding SSH key to agent: $SSH_KEY_PATH"
   ssh-add "$SSH_KEY_PATH"
 else
   echo "[✓] SSH key already loaded in agent"
+fi
+if ! ssh-add -l 2>/dev/null | grep -q "$PERSONAL_KEY_PATH"; then
+  echo "[+] Adding personal SSH key to agent: $PERSONAL_KEY_PATH"
+  ssh-add "$PERSONAL_KEY_PATH"
+else
+  echo "[✓] Personal SSH key already loaded in agent"
 fi
 
 # Ensure SSH config for GitHub uses this key
@@ -303,7 +324,11 @@ for desc in "${ORDER[@]}"; do
     if prompt_yes_no "Do you want to ${desc}?"; then
       echo "[+] ${desc}..."
       chmod +x "$path"
-      bash "$path"
+      # Helpers are optional + interactive; don't kill the bootstrap if one
+      # fails (e.g. user typos a password during ssh-copy-id).
+      if ! bash "$path"; then
+        echo "⚠️  ${desc} exited non-zero; continuing with next helper"
+      fi
     else
       echo "⏭️  Skipping ${desc}."
     fi
