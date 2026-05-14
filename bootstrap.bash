@@ -12,8 +12,11 @@ while true; do sudo -n true; sleep 60; done \
   2>/dev/null </dev/null &
 SUDO_LOOP_PID=$!
 
-# Ensure the loop is killed on script exit
-trap 'kill "$SUDO_LOOP_PID"' EXIT
+# Ensure the loop is killed on script exit. The keepalive can die on its
+# own mid-script if sudo cache expires during a long install (set -e inside
+# the subshell catches it), so the kill must tolerate a dead PID — without
+# the `2>/dev/null || true`, ERR trap fires after a clean run.
+trap 'kill "$SUDO_LOOP_PID" 2>/dev/null || true' EXIT
 
 SCRIPTSDIR="$HOME/scripts"
 
@@ -275,6 +278,39 @@ else
   echo "⚠️  ssh-keyscan not available; will fall back to StrictHostKeyChecking=accept-new"
 fi
 
+# Install Claude Code so chezmoi's run_onchange_install-claude-plugins.sh.tmpl
+# can register marketplaces + replay plugins on first apply. Cross-platform
+# official installer; same URL works on macOS and Linux. Defensive
+# download-then-exec — the installer is short but consistency matters.
+if ! command -v claude &>/dev/null; then
+  echo "[+] Installing Claude Code..."
+  claude_install="$(mktemp)"
+  curl -fsSL "https://claude.ai/install.sh" -o "$claude_install"
+  bash "$claude_install" || echo "⚠️  Claude installer returned non-zero; continuing."
+  rm -f "$claude_install"
+  # The installer updates the user's shell rc, but that doesn't help THIS
+  # script's PATH. Probe likely install locations and prepend explicitly.
+  for d in "$HOME/.local/bin" "$HOME/.claude/local"; do
+    if [[ -x "$d/claude" && ":$PATH:" != *":$d:"* ]]; then
+      export PATH="$d:$PATH"
+    fi
+  done
+  hash -r
+else
+  echo "[✓] Claude Code already installed."
+fi
+
+if command -v claude &>/dev/null; then
+  # `claude login` is idempotent: returns quickly if already authed,
+  # otherwise prompts the device-code flow (works because download-then-exec
+  # means stdin is the TTY, not a curl pipe).
+  echo "[+] Ensuring Claude is authenticated..."
+  claude login || echo "⚠️  claude login returned non-zero; rerun 'claude login' manually."
+else
+  echo "⚠️  Claude not on PATH after install attempt — plugin replay will be skipped."
+  echo "    After bootstrap, open a fresh terminal and run:  claude login && chezmoi apply"
+fi
+
 echo "[+] Initializing chezmoi..."
 if [ -d "$HOME/.local/share/chezmoi" ]; then
   echo "[✓] chezmoi already initialized"
@@ -315,19 +351,6 @@ if ! chezmoi apply; then
   fi
 fi
 
-# Helper menu is Linux/LAN-specific (add-pi-keys, systemd .mount Samba,
-# BitLocker via cryptsetup). Skip entirely on macOS.
-if [[ "$OS_TYPE" == "Darwin" ]]; then
-  echo "[+] macOS — skipping Linux/LAN helper menu (Pi keys, Samba mount, BitLocker)."
-  echo "    SMB on macOS: Finder → Cmd+K → smb://<host>/<share>"
-  echo
-  echo "✓ Done! To apply your new login shell, log out and back in (or reboot)."
-  echo
-  echo "Enjoy your new workstation!"
-  echo
-  exit 0
-fi
-
 # Helper scripts.
 # Dropped from this menu (2026-05-13):
 #   - add-gh-ssh-keys.bash → bootstrap.bash now uploads the personal SSH key
@@ -351,12 +374,14 @@ declare -A HELPERS=(
 # ["Set up br0 bridge interface"]="$BRIDGE_SCRIPT" # TODO
 
 
-# Declare the order we want
-ORDER=(
-  "Add SSH keys to Pis"
-  "Mount Samba share"
-  "Set up BitLocker mounts"
-)
+# Declare the order we want. Pi-keys helper is cross-platform (just
+# ssh-copy-id). Samba mount uses systemd .mount units, BitLocker uses
+# cryptsetup — both Linux-only, so we omit them from the menu on macOS
+# (SMB on Mac: Finder → Cmd+K → smb://<host>/<share>).
+ORDER=("Add SSH keys to Pis")
+if [[ "$OS_TYPE" != "Darwin" ]]; then
+  ORDER+=("Mount Samba share" "Set up BitLocker mounts")
+fi
 # "Set up br0 bridge interface" # TODO
 
 

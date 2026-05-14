@@ -7,9 +7,10 @@ Renamed `ansible-bootstrap` → `leoric-bootstrap` on 2026-05-14: the ansible in
 Usage:
 
 ```bash
-curl -fsSL "https://raw.githubusercontent.com/leoric-crown/leoric-bootstrap/main/bootstrap.bash?nocache=$(date +%s)" \
-  | bash 2>&1 | tee /tmp/bootstrap.log
+curl -fsSL "https://raw.githubusercontent.com/leoric-crown/leoric-bootstrap/main/bootstrap.bash?nocache=$(date +%s)" -o /tmp/bootstrap.bash && bash /tmp/bootstrap.bash 2>&1 | tee /tmp/bootstrap.log
 ```
+
+**Download-then-exec, not pipe-to-bash.** Subprocesses inside the script (notably `brew install` on macOS) read from stdin; if bash itself is consuming the script from stdin (curl-pipe-bash form), those subprocess reads eat the unread portion of the script and bash silently terminates when it hits EOF. Caught the hard way on the M5 Macbook Air first run (2026-05-14). Using `-o /tmp/bootstrap.bash && bash /tmp/bootstrap.bash` makes bash read the script from a file argument; stdin is independent and subprocesses can consume it without scrambling execution.
 
 (`curl` over `wget` — Arch base ships curl, not wget. The `tee` keeps a forensics log.)
 
@@ -61,10 +62,10 @@ After chezmoi + ansible apply, L280 unsets the `insteadOf` rewrite **before** ru
 
 ## Refactor checklist
 
-- [ ] Add Claude Code provisioning block after the SSH/gh dance (post known_hosts seeding, pre chezmoi apply): install `claude` binary (curl installer or npm), run `claude login`. Plugin replay then happens automatically via chezmoi `run_onchange_install-claude-plugins.sh.tmpl`.
+- [x] Add Claude Code provisioning block after the SSH/gh dance — **done 2026-05-14**. Uses the cross-platform official installer at `https://claude.ai/install.sh` (download-then-exec), then `claude login` for device-code auth. Plugin replay happens automatically via chezmoi's `run_onchange_install-claude-plugins.sh.tmpl` once `claude` is on PATH + authed.
 - [x] Delete desktop-polish cruft (80 lines) — done 2026-05-13.
-- [x] Drop ansible invocation + ansible clone/sync + `SKIP_ANSIBLE` arg-parser — done 2026-05-13 on the strength of all four `run_onchange_*` scripts existing in chezmoi. Bootstrap is now chezmoi-only; awaiting clean-VM smoke test.
-- [ ] Verify Darwin branch (L69-79 region) when Macbook Neo arrives. Note Apple Silicon `/opt/homebrew` vs Intel `/usr/local` brew path divergence.
+- [x] Drop ansible invocation + ansible clone/sync + `SKIP_ANSIBLE` arg-parser — done 2026-05-13.
+- [x] Verify Darwin branch on Macbook Air M5 (Tahoe 26.5) — **done 2026-05-14**. Fixed three bugs (hardcoded brew prefix via `uname -m`, NONINTERACTIVE=1, shellenv outside the install-conditional). Also fixed: resilient EXIT trap kill (sudo keepalive can die naturally on long brew installs), download-then-exec recommended entry point (curl-pipe-bash scrambled execution when brew consumed stdin), helper menu now selective (Pi keys cross-platform, Samba + BitLocker Linux-only).
 
 ## Don't
 
