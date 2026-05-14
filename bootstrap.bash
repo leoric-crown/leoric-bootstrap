@@ -1,22 +1,6 @@
 #!/bin/bash
 set -euo pipefail
 
-SKIP_ANSIBLE=0
-
-# Parse args
-for arg in "$@"; do
-  case "$arg" in
-    --skip-ansible|-s)
-      SKIP_ANSIBLE=1
-      shift
-      ;;
-    *)
-      echo "Unknown argument: $arg"
-      exit 1
-      ;;
-  esac
-done
-
 trap 'echo "❌ Error on line $LINENO"' ERR
 
 # Cache sudo credentials at script start
@@ -31,17 +15,14 @@ SUDO_LOOP_PID=$!
 # Ensure the loop is killed on script exit
 trap 'kill "$SUDO_LOOP_PID"' EXIT
 
-ANSIBLEDIR="$HOME/ansible"
 SCRIPTSDIR="$HOME/scripts"
 
 SSH_KEY_PATH="$HOME/.ssh/id_leoric_ed25519_github"
 SSH_PUB_PATH="${SSH_KEY_PATH}.pub"
 
 DOTFILESREPO="git@github.com:leoric-crown/dotfiles.git"
-ANSIBLEREPO="git@github.com:leoric-crown/ansible.git"
 SCRIPTSREPO="git@github.com:leoric-crown/leoric-scripts.git"
 
-ANSIBLEBRANCH="main"
 SCRIPTBRANCH="main"
 
 # Detect OS
@@ -156,9 +137,6 @@ export PATH="$HOME/bin:$PATH"
   fi
 )
 
-# Ensure Ansible is installed
-install_if_missing ansible
-
 # Install GitHub CLI (gh)
 install_if_missing gh
 
@@ -234,15 +212,6 @@ else
   chezmoi init "$DOTFILESREPO"
 fi
 
-# Ansible repo
-echo "[+] Cloning ansible repo (branch: $ANSIBLEBRANCH)…"
-if [ ! -d "$ANSIBLEDIR/.git" ]; then
-  git clone --depth 1 --branch "$ANSIBLEBRANCH" \
-    "$ANSIBLEREPO" "$ANSIBLEDIR"
-else
-  echo "[✓] $ANSIBLEDIR already exists, skipping clone."
-fi
-
 # Scripts repo
 echo "[+] Cloning leoric-scripts repo (branch: $SCRIPTBRANCH)…"
 if [ ! -d "$SCRIPTSDIR/.git" ]; then
@@ -252,31 +221,14 @@ else
   echo "[✓] $SCRIPTSDIR already exists, skipping clone."
 fi
 
-if [ -d "$ANSIBLEDIR/.git" ]; then
-  sync_repo "$ANSIBLEREPO" "$ANSIBLEDIR" "$ANSIBLEBRANCH"
-fi
 if [ -d "$SCRIPTSDIR/.git" ]; then
   sync_repo "$SCRIPTSREPO" "$SCRIPTSDIR" "$SCRIPTBRANCH"
 fi
 
-# Ansible provisioning
-if [[ "$SKIP_ANSIBLE" -eq 0 ]]; then
-  if [[ "$OS_TYPE" == "Linux" ]]; then
-    echo "[+] Running Ansible provisioning..."
-    export ANSIBLE_INVENTORY_USER="${USER:-$(whoami)}"
-    export ANSIBLE_INVENTORY_USER_DIR="$HOME"
-    ansible-playbook -i "$ANSIBLEDIR/inventory.yml" "$ANSIBLEDIR/playbook.yml" --ask-become-pass
-  else
-    echo "[✓] Skipping Ansible provisioning (not Fedora/Linux, Ubuntu and macOS not tested yet)"
-  fi
-else
-  echo "⏭️ Skipping Ansible provisioning (skipped by user)"
-fi
-
 # Apply chezmoi config
 echo "[+] Running chezmoi config..."
-# Revert the git config change we made above
-# Ansible set our config up so it sources the chezmoi file
+# Revert the in-bootstrap insteadOf rewrite (set during the SSH/gh dance) so
+# the chezmoi-managed ~/.gitconfig becomes the authoritative URL-rewrite source.
 git config --global --unset url."git@github.com:".insteadOf
 chezmoi apply
 

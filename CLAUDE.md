@@ -60,16 +60,16 @@ After chezmoi + ansible apply, L280 unsets the `insteadOf` rewrite **before** ru
 
 ## Refactor checklist
 
-- [ ] Add Claude Code provisioning block after L227 (post known_hosts seeding, pre chezmoi init): install `claude` binary (curl installer or npm), run `claude login`. Plugin replay happens later via chezmoi `run_onchange_install-claude-plugins.sh.tmpl`.
+- [ ] Add Claude Code provisioning block after the SSH/gh dance (post known_hosts seeding, pre chezmoi apply): install `claude` binary (curl installer or npm), run `claude login`. Plugin replay then happens automatically via chezmoi `run_onchange_install-claude-plugins.sh.tmpl`.
 - [x] Delete desktop-polish cruft (80 lines) — done 2026-05-13.
-- [ ] Drop ansible invocation (L262-274) — all `run_onchange_*` scripts now exist in chezmoi (setup-shell, install-packages, tune-dnf, install-claude-plugins). Next opportunity to test on a clean VM, then strip.
-- [ ] Verify Darwin branch (L69-79) when Macbook Neo arrives. Note Apple Silicon `/opt/homebrew` vs Intel `/usr/local` brew path divergence.
+- [x] Drop ansible invocation + ansible clone/sync + `SKIP_ANSIBLE` arg-parser — done 2026-05-13 on the strength of all four `run_onchange_*` scripts existing in chezmoi. Bootstrap is now chezmoi-only; awaiting clean-VM smoke test.
+- [ ] Verify Darwin branch (L69-79 region) when Macbook Neo arrives. Note Apple Silicon `/opt/homebrew` vs Intel `/usr/local` brew path divergence.
 
 ## Don't
 
 - Don't reorder L170-227.
 - Don't "modernize" the sudo keepalive (L20-32) without testing on a clean VM.
-- Don't add new flags to the arg parser without thinking about curl-pipe UX (currently only `--skip-ansible` / `-s`).
+- Don't add new flags to the arg parser without thinking about curl-pipe UX (parser currently removed; the curl-pipe contract is zero args).
 - Don't delete the apt branch.
 - Don't merge `bootstrap.bash` and the helper menu (L283-329 helpers: gh-keys, pi-keys, pihole, mnt_shared, BitLocker) until the menu has been extracted cleanly to a post-bootstrap script.
 
