@@ -241,11 +241,24 @@ else
   echo "[✓] SSH public key already registered on GitHub"
 fi
 
-# Add GitHub to known_hosts
-if command -v ssh-keyscan >/dev/null 2>&1; then
-  grep -q github.com ~/.ssh/known_hosts 2>/dev/null || ssh-keyscan github.com >> ~/.ssh/known_hosts
+# Pre-seed github.com into known_hosts so the upcoming chezmoi/git clones
+# don't prompt for host-key acceptance. `ssh-keygen -F` is the canonical
+# "is this host already trusted?" check — handles hashed entries that
+# `grep` would miss.
+echo "[+] Pre-seeding github.com host keys in known_hosts..."
+mkdir -p "$HOME/.ssh"
+chmod 700 "$HOME/.ssh"
+touch "$HOME/.ssh/known_hosts"
+if ssh-keygen -F github.com >/dev/null 2>&1; then
+  echo "[✓] github.com already trusted"
+elif command -v ssh-keyscan >/dev/null 2>&1; then
+  if ssh-keyscan -t ed25519,rsa github.com 2>/dev/null >> "$HOME/.ssh/known_hosts"; then
+    echo "[✓] github.com host keys added"
+  else
+    echo "⚠️  ssh-keyscan failed; will fall back to StrictHostKeyChecking=accept-new"
+  fi
 else
-  echo "⚠️  ssh-keyscan not available; skipping GitHub host key preloading"
+  echo "⚠️  ssh-keyscan not available; will fall back to StrictHostKeyChecking=accept-new"
 fi
 
 echo "[+] Initializing chezmoi..."
@@ -253,7 +266,10 @@ if [ -d "$HOME/.local/share/chezmoi" ]; then
   echo "[✓] chezmoi already initialized"
 else
   echo "[+] First-time init of chezmoi"
-  chezmoi init "$DOTFILESREPO"
+  # accept-new auto-trusts unknown hosts but still rejects changed keys —
+  # safety net if the ssh-keyscan above couldn't preload.
+  GIT_SSH_COMMAND="ssh -o StrictHostKeyChecking=accept-new" \
+    chezmoi init "$DOTFILESREPO"
 fi
 
 # Scripts repo — sync_repo handles both clone-if-missing and fetch+reset
