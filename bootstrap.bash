@@ -193,9 +193,32 @@ echo "[✓] SSH config for github.com set. Key fingerprint: $(ssh-keygen -lf "$S
 # Ensure Git is using SSH
 git config --global url."git@github.com:".insteadOf "https://github.com/"
 
-# Ensure GitHub CLI is authenticated
+# Ensure GitHub CLI is authenticated WITH the write:public_key scope so we can
+# upload our SSH pubkey below. The interactive --web flow skips the
+# "upload SSH key?" prompt in a non-TTY (curl-pipe) context, so we request the
+# scope upfront and do the upload explicitly.
 echo "[+] Checking GitHub authentication..."
-gh auth status >/dev/null 2>&1 || gh auth login --hostname github.com --git-protocol ssh --web
+required_scope="write:public_key"
+if ! gh auth status 2>&1 | grep -q "$required_scope"; then
+  if gh auth status >/dev/null 2>&1; then
+    echo "[+] Refreshing gh token to add $required_scope scope..."
+    gh auth refresh --hostname github.com -s "$required_scope"
+  else
+    gh auth login --hostname github.com --git-protocol ssh --web -s "$required_scope"
+  fi
+else
+  echo "[✓] gh already authed with $required_scope scope"
+fi
+
+# Upload SSH pubkey to GitHub if not already there. Idempotent — grep by the
+# key material itself (column 2 of the .pub file), not by title.
+pubkey_material=$(awk '{print $2}' "$SSH_PUB_PATH")
+if ! gh ssh-key list 2>/dev/null | grep -qF "$pubkey_material"; then
+  echo "[+] Uploading SSH public key to GitHub..."
+  gh ssh-key add "$SSH_PUB_PATH" --title "$(hostname) bootstrap $(date +%Y-%m-%d)"
+else
+  echo "[✓] SSH public key already registered on GitHub"
+fi
 
 # Add GitHub to known_hosts
 if command -v ssh-keyscan >/dev/null 2>&1; then
