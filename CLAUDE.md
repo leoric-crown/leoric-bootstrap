@@ -42,17 +42,9 @@ Commits `9092f78` ("defer ssh-key add till later") and `b266f24` (known_hosts) e
 
 After chezmoi + ansible apply, L280 unsets the `insteadOf` rewrite **before** running `chezmoi apply`, so the chezmoi-managed `~/.gitconfig` becomes the authoritative URL-rewrite source going forward. Subtle but load-bearing — without the unset, you'd have two conflicting `insteadOf` blocks.
 
-## Cruft to delete during refactor
+## Cruft deleted 2026-05-13
 
-Per audit 2 (May 2026). ~90 lines of Fedora desktop polish, easily recreated:
-
-- **L331-366** — PIA installer hunt (manual download dance, globs `~/Downloads/pia-linux-*.run`)
-- **L369-378** — GNOME extensions URLs + `xdg-open` prompts
-- **L381-393** — fastfetch/neofetch branch (cosmetic)
-- **L396-401** — NVIDIA driver echo hint (string-only, no logic)
-- **L405-408** — COSMIC DE dnf install hint (string-only)
-
-Consider whether to delete outright or extract to a `post-bootstrap.bash` helper. Curl-pipe contract stays cleaner without them.
+80 lines of Fedora desktop polish removed in one pass (PIA installer hunt, GNOME extension `xdg-open` prompts, fastfetch/neofetch branch, NVIDIA driver hint, COSMIC DE hint). Easily recreated via git history if ever needed; out of scope for the curl-pipe contract.
 
 ## OS branches
 
@@ -69,8 +61,8 @@ Consider whether to delete outright or extract to a `post-bootstrap.bash` helper
 ## Refactor checklist
 
 - [ ] Add Claude Code provisioning block after L227 (post known_hosts seeding, pre chezmoi init): install `claude` binary (curl installer or npm), run `claude login`. Plugin replay happens later via chezmoi `run_onchange_install-claude-plugins.sh.tmpl`.
-- [ ] Delete cruft listed above (~90 lines), or extract to `post-bootstrap.bash`.
-- [ ] Drop ansible invocation (L262-274) once chezmoi `run_onchange_*` scripts exist for provisioning. Until then, leave intact.
+- [x] Delete desktop-polish cruft (80 lines) — done 2026-05-13.
+- [ ] Drop ansible invocation (L262-274) — all `run_onchange_*` scripts now exist in chezmoi (setup-shell, install-packages, tune-dnf, install-claude-plugins). Next opportunity to test on a clean VM, then strip.
 - [ ] Verify Darwin branch (L69-79) when Macbook Neo arrives. Note Apple Silicon `/opt/homebrew` vs Intel `/usr/local` brew path divergence.
 
 ## Don't
