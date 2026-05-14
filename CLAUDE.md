@@ -1,23 +1,21 @@
-# CLAUDE.md — ansible-bootstrap
+# CLAUDE.md — leoric-bootstrap
 
-## Status: REFACTORING
+## Status: SLIM curl-pipe entry point
 
-Curl-pipe entry point for fresh-machine bootstrap:
+Renamed `ansible-bootstrap` → `leoric-bootstrap` on 2026-05-14: the ansible invocation was removed in commit `22cdce9` (2026-05-13), so the old name was a documentation lie. The crown-jewel SSH/gh auth dance stays; provisioning is now done by chezmoi `run_onchange_*.sh.tmpl` scripts (see related repos).
+
+Usage:
 
 ```bash
-curl -fsSL "https://raw.githubusercontent.com/leoric-crown/ansible-bootstrap/main/bootstrap.bash?nocache=$(date +%s)" \
+curl -fsSL "https://raw.githubusercontent.com/leoric-crown/leoric-bootstrap/main/bootstrap.bash?nocache=$(date +%s)" \
   | bash 2>&1 | tee /tmp/bootstrap.log
 ```
 
 (`curl` over `wget` — Arch base ships curl, not wget. The `tee` keeps a forensics log.)
 
-This repo is **being slimmed**, not sunset. The crown-jewel SSH/gh auth dance stays; ansible invocation is being removed in favor of `chezmoi apply` running `run_onchange_*.sh.tmpl` scripts directly.
-
 **Branches:**
-- `main` — refactor target
-- `archive/pre-2026-refactor` — preservation snapshot
-
-**Future:** Once ansible invocation is gone, repo will likely be renamed (e.g., `workstation-bootstrap`) or folded into the dotfiles repo as `dotfiles/bootstrap/`.
+- `main` — current
+- `archive/pre-2026-refactor` — preservation snapshot of the ansible-era state
 
 ## Crown jewel — DO NOT TOUCH
 

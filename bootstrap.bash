@@ -53,13 +53,27 @@ prompt_yes_no() {
 }
 
 if [[ "$OS_TYPE" == "Darwin" ]]; then
-  # macOS
-  if ! command -v brew &>/dev/null; then
-    echo "[+] Homebrew not found; installing..."
-    /bin/bash -c "\$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
-    # Add brew to PATH (Apple Silicon vs Intel)
-    eval "\$($(brew --prefix)/bin/brew shellenv)"
+  # Apple Silicon vs Intel brew prefix — hardcode because brew isn't on PATH yet.
+  if [[ "$(uname -m)" == "arm64" ]]; then
+    BREW_BIN="/opt/homebrew/bin/brew"
+  else
+    BREW_BIN="/usr/local/bin/brew"
   fi
+
+  if [[ ! -x "$BREW_BIN" ]]; then
+    if ! xcode-select -p &>/dev/null; then
+      echo "[!] Command Line Tools (CLT) needed by Homebrew (~1-2GB)."
+      echo "    The Homebrew installer triggers macOS's CLT install GUI — click 'Install'"
+      echo "    when the popup appears, wait for it to finish, then this script resumes."
+    fi
+    echo "[+] Installing Homebrew (non-interactive)..."
+    NONINTERACTIVE=1 /bin/bash -c \
+      "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
+  fi
+
+  # Always re-init brew PATH for the rest of this script.
+  eval "$("$BREW_BIN" shellenv)"
+
   PACKAGE_MANAGER="brew"
   INSTALL_CMD="brew install"
   UPDATE_CMD="brew update"

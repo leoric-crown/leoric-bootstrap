@@ -1,22 +1,22 @@
-# 🚀 bootstrap-ansible
+# 🚀 leoric-bootstrap
 
-Provision Ubuntu/Fedora workstations in minutes using GitHub + Ansible + chezmoi.
+Curl-pipe entry point that provisions a fresh workstation (Linux or macOS) by bootstrapping the GitHub auth chain and handing off to chezmoi.
 
 This script automates:
 
-- ✅ GitHub CLI login
+- ✅ GitHub CLI login + SSH pubkey upload to GitHub
+- ✅ Bootstrapping Homebrew on macOS (CLT install auto-triggered by brew's installer)
 - ✅ Cloning your private [dotfiles](https://github.com/leoric-crown/dotfiles) via chezmoi
-- ✅ Cloning and applying your [ansible](https://github.com/leoric-crown/ansible) provisioning repo
-- ✅ Mostly unattended workstation setup
+- ✅ `chezmoi apply` → `run_onchange_*` scripts handle packages, shell, plugins
 
 ---
 
 ## ⚡ Usage
 
-Run this on a freshly installed Arch (Omarchy), Fedora, or Ubuntu/WSL system:
+Run this on a freshly installed Arch (Omarchy), Fedora, Ubuntu/WSL, or macOS system:
 
 ```bash
-curl -fsSL "https://raw.githubusercontent.com/leoric-crown/ansible-bootstrap/main/bootstrap.bash?nocache=$(date +%s)" \
+curl -fsSL "https://raw.githubusercontent.com/leoric-crown/leoric-bootstrap/main/bootstrap.bash?nocache=$(date +%s)" \
   | bash 2>&1 | tee /tmp/bootstrap.log
 ```
 
