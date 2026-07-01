@@ -55,6 +55,20 @@ prompt_yes_no() {
   [[ $ans =~ ^[Yy]$ ]]
 }
 
+# Report SSH reachability as "<sshd_active> <port22>" e.g. "active open" /
+# "inactive blocked". Read-only. Linux-only (sshd/ufw) — callers gate on
+# OS_TYPE. "open" also covers the no-firewall case (nothing dropping :22).
+ssh_status() {
+  local active port
+  active="$(systemctl is-active sshd 2>/dev/null || true)"
+  if command -v ufw >/dev/null 2>&1 && sudo ufw status 2>/dev/null | grep -qi '^Status: active'; then
+    if sudo ufw status 2>/dev/null | grep -qE '22/tcp|OpenSSH'; then port="open"; else port="blocked"; fi
+  else
+    port="open"
+  fi
+  echo "$active $port"
+}
+
 if [[ "$OS_TYPE" == "Darwin" ]]; then
   # Apple Silicon vs Intel brew prefix — hardcode because brew isn't on PATH yet.
   if [[ "$(uname -m)" == "arm64" ]]; then
@@ -387,6 +401,24 @@ BITLOCKER_SCRIPT="$SCRIPTSDIR/linux/bitlocker/bitlocker-setup.bash"
 
 echo "[+] Running optional helper scripts..."
 
+# Remote access: offer to open SSH so a future degraded run can be
+# troubleshot from another machine (see the report printed at end of run).
+# Only prompts when the box isn't already reachable, so it's silent on a
+# box that's already set up. Opt-in — enabling sshd is a posture choice.
+if [[ "$OS_TYPE" == "Linux" ]]; then
+  read -r _sshd _port <<<"$(ssh_status)"
+  if [[ "$_sshd" != "active" || "$_port" == "blocked" ]]; then
+    if prompt_yes_no "Enable SSH server + open the firewall for remote access?"; then
+      if sudo systemctl enable --now sshd; then echo "✓ sshd enabled"; else echo "⚠️  could not enable sshd"; fi
+      if command -v ufw >/dev/null 2>&1 && sudo ufw status 2>/dev/null | grep -qi '^Status: active'; then
+        sudo ufw allow ssh >/dev/null 2>&1 && echo "✓ ufw: port 22 opened" || true
+      fi
+    else
+      echo "⏭️  Skipping SSH remote-access setup."
+    fi
+  fi
+fi
+
 # Parallel arrays — avoids `declare -A name=(["key with spaces"]=val)` which
 # trips bash's set -u in some versions (arithmetic eval on the key names the
 # inner words as variables; reproduced as "Pis: unbound variable" on macOS
@@ -425,6 +457,21 @@ done
 
 echo "✓ Done! To apply your new login shell and desktop entries, log out and back in (or reboot)."
 echo
+
+# Remote-access cheat-sheet — always printed on Linux so the IP + the exact
+# fix commands are one glance away if you ever need to SSH in to recover a
+# degraded box (the toil this whole block exists to kill).
+if [[ "$OS_TYPE" == "Linux" ]]; then
+  _ips="$(ip -4 -o addr show scope global 2>/dev/null | awk '{print $4}' | cut -d/ -f1 | paste -sd' ' - || true)"
+  read -r _sshd _port <<<"$(ssh_status)"
+  echo "── Remote access (SSH) ──"
+  echo "  Host: $(hostname)    LAN IP: ${_ips:-<none found>}"
+  if [[ "$_sshd" == "active" ]]; then echo "  sshd:    active ✓"; else echo "  sshd:    OFF     → sudo systemctl enable --now sshd"; fi
+  if [[ "$_port" == "open" ]]; then echo "  port 22: reachable ✓"; else echo "  port 22: BLOCKED → sudo ufw allow ssh"; fi
+  [[ -n "${_ips:-}" ]] && echo "  Connect: ssh $(id -un)@$(awk '{print $1}' <<<"$_ips")"
+  echo
+fi
+
 echo "Enjoy your new workstation!"
 echo
 
