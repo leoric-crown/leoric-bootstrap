@@ -169,9 +169,14 @@ else
   install_if_missing gh
 fi
 
-# Ensure chezmoi is installed
+# Ensure chezmoi is installed.
+# -b "$HOME/.local/bin": the installer defaults to ./bin (i.e. ~/bin when run
+# from HOME), which is NOT on the durable interactive PATH — only ~/.local/bin
+# is (via chezmoi-managed dot_zshrc). Without -b, chezmoi works for the rest
+# of THIS script (line ~148 adds ~/bin to the script's PATH) but disappears
+# from the user's shell afterward. Install straight into a PATH dir instead.
 echo "[+] Ensuring chezmoi is installed/up-to-date..."
-curl -fsLS get.chezmoi.io | sh
+curl -fsLS get.chezmoi.io | sh -s -- -b "$HOME/.local/bin"
 
 
 echo "[+] Setting up SSH key for GitHub..."
