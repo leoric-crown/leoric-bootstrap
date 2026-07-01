@@ -69,6 +69,21 @@ ssh_status() {
   echo "$active $port"
 }
 
+# Collapse duplicate entries in $PATH (keep first occurrence). Bash has no
+# zsh-style `typeset -U path`; a duplicate ~/.local/bin makes the Astral uv
+# installer emit a spurious "uv/uvx shadowed by other commands" warning.
+dedupe_path() {
+  local IFS=: dir out="" seen=":"
+  for dir in $PATH; do
+    if [ -z "$dir" ]; then continue; fi
+    case "$seen" in *":$dir:"*) continue ;; esac
+    out="${out:+$out:}$dir"
+    seen="${seen}${dir}:"
+  done
+  PATH="$out"
+  export PATH
+}
+
 if [[ "$OS_TYPE" == "Darwin" ]]; then
   # Apple Silicon vs Intel brew prefix — hardcode because brew isn't on PATH yet.
   if [[ "$(uname -m)" == "arm64" ]]; then
@@ -158,8 +173,11 @@ for cmd in git curl sudo; do
 done
 
 cd "$HOME"
-export PATH="$HOME/.local/bin:$PATH"
-export PATH="$HOME/bin:$PATH"
+# Prepend personal bin dirs, then collapse dupes so a ~/.local/bin already on
+# PATH (parent shell / Omarchy profile) isn't doubled — a duplicate entry
+# triggers a spurious "uv/uvx shadowed" warning from the Astral installer.
+PATH="$HOME/bin:$HOME/.local/bin:$PATH"
+dedupe_path
 
 # Run in a subshell with `set +e` so errors never bubble out
 (
