@@ -121,10 +121,11 @@ echo "[+] Updating package list..."
 $UPDATE_CMD
 
 install_if_missing() {
-  local pkg="$1"
+  local pkg="$1"                 # probe binary (command name)
+  local pkgname="${2:-$1}"       # package name — may differ from the binary (e.g. gh -> github-cli on Arch)
   if ! command -v "$pkg" &>/dev/null; then
-    echo "[+] Installing $pkg..."
-    $INSTALL_CMD "$pkg"
+    echo "[+] Installing $pkg (pkg: $pkgname)..."
+    $INSTALL_CMD "$pkgname"
   else
     echo "[✓] $pkg already installed."
   fi
@@ -159,8 +160,14 @@ export PATH="$HOME/bin:$PATH"
   fi
 )
 
-# Install GitHub CLI (gh)
-install_if_missing gh
+# Install GitHub CLI (gh). Omarchy ships it OOTB (VM smoke test passed), so this
+# usually no-ops — but on Arch the package is `github-cli`, not `gh`, so a bare
+# `pacman -S gh` would "target not found" and (under set -e) abort the whole bootstrap.
+if [[ "${PACKAGE_MANAGER:-}" == "pacman" ]]; then
+  install_if_missing gh github-cli
+else
+  install_if_missing gh
+fi
 
 # Ensure chezmoi is installed
 echo "[+] Ensuring chezmoi is installed/up-to-date..."
