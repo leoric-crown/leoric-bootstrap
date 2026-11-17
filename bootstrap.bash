@@ -32,6 +32,18 @@ DOTFILESREPO="git@github.com:leoric-crown/dotfiles.git"
 SCRIPTSREPO="git@github.com:leoric-crown/leoric-scripts.git"
 
 SCRIPTBRANCH="main"
+# Branch for a FIRST chezmoi init only (an existing source dir keeps whatever
+# branch it's on). Env var, not a flag, to keep the zero-arg curl contract:
+#   DOTFILES_BRANCH=quattro-stack bash /tmp/bootstrap.bash
+DOTFILES_BRANCH="${DOTFILES_BRANCH:-}"
+
+# Omarchy (either generation) owns the desktop theme and ships its own tool
+# set; several steps below defer to it. Gen 4 = /usr/share/omarchy (system
+# package), gen 3 = ~/.local/share/omarchy (git checkout).
+IS_OMARCHY=0
+if [[ -d /usr/share/omarchy || -d "$HOME/.local/share/omarchy" ]]; then
+  IS_OMARCHY=1
+fi
 
 # Detect OS
 OS_TYPE="$(uname -s)"
@@ -39,15 +51,44 @@ PACKAGE_MANAGER=""
 INSTALL_CMD=""
 UPDATE_CMD=""
 
+# Clone if missing; otherwise fast-forward only. Never reset --hard, never
+# switch branches: an existing checkout may hold local work (leoric-scripts is
+# edited in place), so anything that isn't a clean fast-forward on $branch is
+# reported and left alone. chezmoi's run_before_pull-leoric-scripts keeps it
+# current on later applies anyway.
 sync_repo() {
-  local url=$1 dir=$2 branch=$3
+  local url=$1 dir=$2 branch=$3 current
   if [ ! -d "$dir/.git" ]; then
-    git clone --depth 1 --branch "$branch" "$url" "$dir"
-  else
-    git -C "$dir" fetch origin "$branch"
-    git -C "$dir" checkout "$branch"
-    git -C "$dir" reset --hard "origin/$branch"
+    git clone --branch "$branch" "$url" "$dir"
+    return
   fi
+  current="$(git -C "$dir" rev-parse --abbrev-ref HEAD 2>/dev/null || echo '?')"
+  if [[ "$current" != "$branch" ]]; then
+    echo "⚠️  $dir is on branch '$current', not '$branch'; leaving it alone."
+    return
+  fi
+  if [[ -n "$(git -C "$dir" status --porcelain 2>/dev/null)" ]]; then
+    echo "⚠️  $dir has uncommitted changes; leaving it alone."
+    return
+  fi
+  if ! git -C "$dir" fetch origin "$branch"; then
+    echo "⚠️  fetch failed for $dir; leaving it as is."
+    return
+  fi
+  if git -C "$dir" merge --ff-only "origin/$branch" >/dev/null 2>&1; then
+    echo "[✓] $dir at origin/$branch"
+  else
+    echo "⚠️  $dir has diverged from origin/$branch; leaving it alone (resolve by hand)."
+  fi
+}
+
+# Does GitHub accept our SSH key? GitHub answers a successful auth with exit 1
+# and "successfully authenticated", a refused key with 255. accept-new trusts
+# github.com on first contact (same TOFU as the ssh-keyscan step) but still
+# rejects a CHANGED host key.
+github_ssh_ok() {
+  ssh -o BatchMode=yes -o StrictHostKeyChecking=accept-new -o IdentitiesOnly=yes \
+      -i "$SSH_KEY_PATH" -T git@github.com 2>&1 | grep -q "successfully authenticated"
 }
 
 prompt_yes_no() {
@@ -124,9 +165,14 @@ elif [[ -f /etc/os-release ]]; then
       UPDATE_CMD="sudo dnf makecache --refresh"
       ;;
     arch)
+      # Never a bare `pacman -Sy`: syncing the db and then installing with
+      # -S is a partial upgrade, which Arch doesn't support. Installs go
+      # through -Syu --needed instead, and only when something is actually
+      # missing, so a fully provisioned (or package-frozen) Arch box never
+      # touches pacman here.
       PACKAGE_MANAGER="pacman"
-      INSTALL_CMD="sudo pacman -S --noconfirm"
-      UPDATE_CMD="sudo pacman -Sy"
+      INSTALL_CMD="sudo pacman -Syu --needed --noconfirm"
+      UPDATE_CMD=""
       ;;
     *)(
       echo "❌ Unsupported Linux distribution: $ID" >&2
@@ -144,15 +190,24 @@ echo "🚀 Starting bootstrap process..."
 
 echo "Found package manager: $PACKAGE_MANAGER"
 echo "Found install command: $INSTALL_CMD"
-echo "Found update command: $UPDATE_CMD"
+echo "Found update command: ${UPDATE_CMD:-<none; folded into install>}"
 
-echo "[+] Updating package list..."
-$UPDATE_CMD
+# The package index is refreshed lazily: only right before the first install
+# that's actually needed. A re-run on a provisioned box changes nothing.
+PKG_INDEX_FRESH=0
+refresh_pkg_index_once() {
+  if [[ $PKG_INDEX_FRESH -eq 0 && -n "$UPDATE_CMD" ]]; then
+    echo "[+] Updating package list..."
+    $UPDATE_CMD
+  fi
+  PKG_INDEX_FRESH=1
+}
 
 install_if_missing() {
   local pkg="$1"                 # probe binary (command name)
   local pkgname="${2:-$1}"       # package name — may differ from the binary (e.g. gh -> github-cli on Arch)
   if ! command -v "$pkg" &>/dev/null; then
+    refresh_pkg_index_once
     echo "[+] Installing $pkg (pkg: $pkgname)..."
     $INSTALL_CMD "$pkgname"
   else
@@ -177,14 +232,23 @@ cd "$HOME"
 # PATH (parent shell / Omarchy profile) isn't doubled — a duplicate entry
 # triggers a spurious "uv/uvx shadowed" warning from the Astral installer.
 PATH="$HOME/bin:$HOME/.local/bin:$PATH"
+# Omarchy 4 provides gh, claude, node, uv... as mise tools (shims install on
+# first use). Append the shim dir so the "already installed?" probes below see
+# them instead of installing a second copy. Appended, not prepended: same
+# order as Omarchy's own env-bootstrap.
+if [[ -d "$HOME/.local/share/mise/shims" ]]; then
+  PATH="$PATH:$HOME/.local/share/mise/shims"
+fi
 dedupe_path
 
 # Run in a subshell with `set +e` so errors never bubble out
 (
   set +e
 
-  # Only try gsettings if it exists and there's a session bus
-  if command -v gsettings &>/dev/null && [ -S "/run/user/$(id -u)/bus" ]; then
+  # Only try gsettings if it exists and there's a session bus. Not on Omarchy:
+  # its theme system sets gtk-theme/color-scheme per theme (light themes
+  # included), and forcing Adwaita-dark on every run would fight it.
+  if [[ $IS_OMARCHY -eq 0 ]] && command -v gsettings &>/dev/null && [ -S "/run/user/$(id -u)/bus" ]; then
     export DBUS_SESSION_BUS_ADDRESS="unix:path=/run/user/$(id -u)/bus"
     echo "[+] Setting dark theme..."
     gsettings set org.gnome.desktop.interface gtk-theme 'Adwaita-dark' || true
@@ -207,8 +271,15 @@ fi
 # is (via chezmoi-managed dot_zshrc). Without -b, chezmoi works for the rest
 # of THIS script (line ~148 adds ~/bin to the script's PATH) but disappears
 # from the user's shell afterward. Install straight into a PATH dir instead.
-echo "[+] Ensuring chezmoi is installed/up-to-date..."
-curl -fsLS get.chezmoi.io | sh -s -- -b "$HOME/.local/bin"
+# Install only when missing: reinstalling on every run would drop a second
+# copy into ~/.local/bin on a box whose chezmoi lives elsewhere (e.g. ~/bin
+# from a manual install). Upgrading is `chezmoi upgrade`, at the user's cadence.
+if command -v chezmoi &>/dev/null; then
+  echo "[✓] chezmoi already installed at $(command -v chezmoi)"
+else
+  echo "[+] Installing chezmoi..."
+  curl -fsLS get.chezmoi.io | sh -s -- -b "$HOME/.local/bin"
+fi
 
 
 echo "[+] Setting up SSH key for GitHub..."
@@ -272,34 +343,56 @@ else
 fi
 echo "[✓] SSH config for github.com set. Key fingerprint: $(ssh-keygen -lf "$SSH_PUB_PATH")"
 
-# Ensure Git is using SSH
-git config --global url."git@github.com:".insteadOf "https://github.com/"
+# Ensure Git is using SSH — for THIS script's git calls only. Set through
+# git's env-config (GIT_CONFIG_COUNT/KEY_n/VALUE_n), not `git config --global`:
+# on a provisioned box ~/.gitconfig is chezmoi-managed, and the old
+# write-then-unset left an empty [url] section behind that made the next
+# `chezmoi update` stop and ask about an externally modified file. Nothing
+# here touches disk; it's cleared again before the chezmoi apply below.
+export GIT_CONFIG_COUNT=1
+export GIT_CONFIG_KEY_0='url.git@github.com:.insteadOf'
+export GIT_CONFIG_VALUE_0='https://github.com/'
 
-# Ensure GitHub CLI is authenticated WITH the write:public_key scope so we can
-# upload our SSH pubkey below. The interactive --web flow skips the
-# "upload SSH key?" prompt in a non-TTY (curl-pipe) context, so we request the
-# scope upfront and do the upload explicitly.
-echo "[+] Checking GitHub authentication..."
-required_scope="write:public_key"
-if ! gh auth status 2>&1 | grep -q "$required_scope"; then
-  if gh auth status >/dev/null 2>&1; then
-    echo "[+] Refreshing gh token to add $required_scope scope..."
-    gh auth refresh --hostname github.com -s "$required_scope"
+# Upload the SSH pubkey to GitHub, unless GitHub already accepts it. The SSH
+# probe comes first so a box whose key is registered never needs the
+# public_key scope (asking for it opens a browser every run otherwise).
+echo "[+] Checking GitHub SSH access..."
+if github_ssh_ok; then
+  echo "[✓] GitHub already accepts $SSH_KEY_PATH; skipping gh key upload"
+else
+  # Ensure GitHub CLI is authenticated WITH a public_key write scope so we can
+  # upload our SSH pubkey below. The interactive --web flow skips the
+  # "upload SSH key?" prompt in a non-TTY (curl-pipe) context, so we request
+  # the scope upfront and do the upload explicitly. admin:public_key also
+  # counts (it includes write).
+  echo "[+] Checking GitHub authentication..."
+  required_scope="write:public_key"
+  if ! gh auth status 2>&1 | grep -qE "(write|admin):public_key"; then
+    if gh auth status >/dev/null 2>&1; then
+      echo "[+] Refreshing gh token to add $required_scope scope..."
+      gh auth refresh --hostname github.com -s "$required_scope"
+    else
+      gh auth login --hostname github.com --git-protocol ssh --web -s "$required_scope"
+    fi
   else
-    gh auth login --hostname github.com --git-protocol ssh --web -s "$required_scope"
+    echo "[✓] gh already authed with a public_key write scope"
   fi
-else
-  echo "[✓] gh already authed with $required_scope scope"
-fi
 
-# Upload SSH pubkey to GitHub if not already there. Idempotent — grep by the
-# key material itself (column 2 of the .pub file), not by title.
-pubkey_material=$(awk '{print $2}' "$SSH_PUB_PATH")
-if ! gh ssh-key list 2>/dev/null | grep -qF "$pubkey_material"; then
-  echo "[+] Uploading SSH public key to GitHub..."
-  gh ssh-key add "$SSH_PUB_PATH" --title "$(hostname) bootstrap $(date +%Y-%m-%d)"
-else
-  echo "[✓] SSH public key already registered on GitHub"
+  # Upload SSH pubkey to GitHub if not already there. Idempotent — grep by the
+  # key material itself (column 2 of the .pub file), not by title.
+  pubkey_material=$(awk '{print $2}' "$SSH_PUB_PATH")
+  if ! gh ssh-key list 2>/dev/null | grep -qF "$pubkey_material"; then
+    echo "[+] Uploading SSH public key to GitHub..."
+    gh ssh-key add "$SSH_PUB_PATH" --title "$(hostname -s) bootstrap $(date +%Y-%m-%d)"
+  else
+    echo "[✓] SSH public key already registered on GitHub"
+  fi
+
+  if github_ssh_ok; then
+    echo "[✓] GitHub now accepts $SSH_KEY_PATH"
+  else
+    echo "⚠️  GitHub still refuses $SSH_KEY_PATH; the clones below will likely fail."
+  fi
 fi
 
 # Pre-seed github.com into known_hosts so the upcoming chezmoi/git clones
@@ -362,14 +455,28 @@ else
 fi
 
 echo "[+] Initializing chezmoi..."
+# Recorded before init: "provisioned" = chezmoi has applied on this box
+# before. Gates the install-packages confirmation further down.
+FIRST_APPLY=1
+if [[ -f "$HOME/.config/chezmoi/chezmoistate.boltdb" ]]; then
+  FIRST_APPLY=0
+fi
+
 if [ -d "$HOME/.local/share/chezmoi" ]; then
-  echo "[✓] chezmoi already initialized"
+  echo "[✓] chezmoi already initialized (branch: $(git -C "$HOME/.local/share/chezmoi" rev-parse --abbrev-ref HEAD 2>/dev/null || echo '?'))"
+  if [[ -n "$DOTFILES_BRANCH" ]]; then
+    echo "    DOTFILES_BRANCH=$DOTFILES_BRANCH ignored: it only applies to a first init."
+  fi
 else
-  echo "[+] First-time init of chezmoi"
+  echo "[+] First-time init of chezmoi${DOTFILES_BRANCH:+ (branch: $DOTFILES_BRANCH)}"
+  init_args=()
+  if [[ -n "$DOTFILES_BRANCH" ]]; then
+    init_args=(--branch "$DOTFILES_BRANCH")
+  fi
   # accept-new auto-trusts unknown hosts but still rejects changed keys —
   # safety net if the ssh-keyscan above couldn't preload.
   GIT_SSH_COMMAND="ssh -o StrictHostKeyChecking=accept-new" \
-    chezmoi init "$DOTFILESREPO"
+    chezmoi init ${init_args[@]+"${init_args[@]}"} "$DOTFILESREPO"  # bash 3.2 (fresh macOS) + set -u: empty "${a[@]}" is unbound
 fi
 
 # Scripts repo — sync_repo handles both clone-if-missing and fetch+reset
@@ -379,26 +486,52 @@ sync_repo "$SCRIPTSREPO" "$SCRIPTSDIR" "$SCRIPTBRANCH"
 
 # Apply chezmoi config
 echo "[+] Running chezmoi config..."
-# Revert the in-bootstrap insteadOf rewrite (set during the SSH/gh dance) so
-# the chezmoi-managed ~/.gitconfig becomes the authoritative URL-rewrite source.
-git config --global --unset url."git@github.com:".insteadOf
+# Drop the script-scoped insteadOf rewrite (set during the SSH/gh dance) so
+# the chezmoi-managed ~/.gitconfig is the only URL-rewrite source for the
+# pull and apply below.
+unset GIT_CONFIG_COUNT GIT_CONFIG_KEY_0 GIT_CONFIG_VALUE_0
 
-# Use `chezmoi update` (pull + apply) so re-runs of bootstrap pick up upstream
-# chezmoi commits — this is what makes the full bootstrap one-liner idempotent
-# end-to-end. On first run, the pull is a no-op (source was just cloned).
-#
-# If chezmoi update fails (e.g. a run_onchange_ script bailed because sudo
-# wasn't cached), don't crash bootstrap.bash — try once with refreshed sudo,
-# then surface the failure cleanly.
-if ! chezmoi update; then
+# Pull upstream chezmoi commits first, then apply as a separate step, so
+# re-runs of bootstrap pick up new commits (that's what makes the one-liner
+# idempotent end-to-end) but we can look at what will run before it runs.
+# On first run, the pull is a no-op (source was just cloned).
+if ! chezmoi update --apply=false; then
+  echo "⚠️  chezmoi couldn't pull upstream; applying the local source as is."
+fi
+
+# Show which run-scripts this apply will execute. install-packages is the
+# heavy one: on Arch it runs `pacman -Syu`, which must never happen behind
+# the back of a box whose packages are deliberately frozen (leoric-ws, until
+# its Quattro upgrade). On a box chezmoi has provisioned before, it only
+# runs when someone changed it upstream, so ask (default: no). A first
+# provision doesn't ask; installing packages is the point.
+pending_scripts="$(chezmoi status --include=scripts 2>/dev/null | awk '{print $NF}' || true)"
+if [[ -n "$pending_scripts" ]]; then
+  echo "[+] Scripts this apply will run:"
+  printf '      %s\n' $pending_scripts
+fi
+DO_APPLY=1
+if [[ $FIRST_APPLY -eq 0 ]] && grep -q 'install-packages' <<<"$pending_scripts"; then
+  echo "⚠️  install-packages is pending on an already-provisioned box."
+  echo "    It installs/upgrades system packages (Arch: pacman -Syu; macOS: brew)."
+  if ! prompt_yes_no "Run it now (applies everything else too)?"; then
+    DO_APPLY=0
+    echo "⏭️  Skipping chezmoi apply. Run it later with: sudo -v && chezmoi apply"
+  fi
+fi
+
+# If the apply fails (e.g. a run_onchange_ script bailed because sudo wasn't
+# cached), don't crash bootstrap.bash — try once with refreshed sudo, then
+# surface the failure cleanly.
+if [[ $DO_APPLY -eq 1 ]] && ! chezmoi apply; then
   echo
   echo "⚠️  chezmoi apply returned non-zero. Most common cause: a run_onchange_"
   echo "    script needed sudo and the cached credentials expired."
   echo "[+] Refreshing sudo and retrying once..."
-  if sudo -v && chezmoi update; then
-    echo "✓ chezmoi update succeeded on retry."
+  if sudo -v && chezmoi apply; then
+    echo "✓ chezmoi apply succeeded on retry."
   else
-    echo "✗ chezmoi update still failing — inspect output above. You can rerun"
+    echo "✗ chezmoi apply still failing — inspect output above. You can rerun"
     echo "  manually any time with: sudo -v && chezmoi update"
     echo "  Bootstrap will continue to the helper menu so you can still use"
     echo "  the partially-provisioned system."
