@@ -103,7 +103,9 @@ ssh_status() {
   local active port
   active="$(systemctl is-active sshd 2>/dev/null || true)"
   if command -v ufw >/dev/null 2>&1 && sudo ufw status 2>/dev/null | grep -qi '^Status: active'; then
-    if sudo ufw status 2>/dev/null | grep -qE '22/tcp|OpenSSH'; then port="open"; else port="blocked"; fi
+    # `ufw allow ssh` adds tcp+udp, which `ufw status` lists as plain "22"
+    # (not "22/tcp"); app profiles show as "OpenSSH"/"SSH". Match column 1.
+    if sudo ufw status 2>/dev/null | awk '$1 ~ /^(22|22\/tcp|OpenSSH|SSH)$/ && /ALLOW/ {found=1} END {exit !found}'; then port="open"; else port="blocked"; fi
   else
     port="open"
   fi
@@ -397,10 +399,18 @@ else
     echo "[✓] SSH public key already registered on GitHub"
   fi
 
-  if github_ssh_ok; then
+  # A just-added key takes a few seconds to go live on GitHub's SSH side
+  # (seen on leoric-hp 2026-11-16: refused right after the upload, accepted
+  # seconds later), so retry briefly before calling it a failure.
+  github_accepted=0
+  for _ in 1 2 3 4 5 6; do
+    if github_ssh_ok; then github_accepted=1; break; fi
+    sleep 3
+  done
+  if [[ $github_accepted -eq 1 ]]; then
     echo "[✓] GitHub now accepts $SSH_KEY_PATH"
   else
-    echo "⚠️  GitHub still refuses $SSH_KEY_PATH; the clones below will likely fail."
+    echo "⚠️  GitHub still refuses $SSH_KEY_PATH after ~18s; the clones below will likely fail."
   fi
 fi
 
