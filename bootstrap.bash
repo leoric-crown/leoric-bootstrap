@@ -153,7 +153,15 @@ if [[ "$OS_TYPE" == "Darwin" ]]; then
 elif [[ -f /etc/os-release ]]; then
   # Linux: detect package manager
   . /etc/os-release
-  case "$ID" in
+  # Match on ID first, then each ID_LIKE entry: derivatives report their own
+  # ID (Omarchy 4: ID=omarchy, ID_LIKE=arch; Omarchy 3.x said plain ID=arch).
+  distro=""
+  for candidate in "$ID" ${ID_LIKE:-}; do
+    case "$candidate" in
+      ubuntu|debian|fedora|rhel|centos|arch) distro="$candidate"; break ;;
+    esac
+  done
+  case "$distro" in
     ubuntu|debian)
       PACKAGE_MANAGER="apt"
       INSTALL_CMD="sudo apt-get install -y"
@@ -174,10 +182,11 @@ elif [[ -f /etc/os-release ]]; then
       INSTALL_CMD="sudo pacman -Syu --needed --noconfirm"
       UPDATE_CMD=""
       ;;
-    *)(
-      echo "❌ Unsupported Linux distribution: $ID" >&2
+    *)
+      # Plain exit, not inside ( ... ): a subshell's exit only leaves the
+      # subshell.
+      echo "❌ Unsupported Linux distribution: $ID (ID_LIKE: ${ID_LIKE:-none})" >&2
       exit 1
-      )
       ;;
   esac
 else
